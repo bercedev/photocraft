@@ -182,6 +182,7 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
 /// varying fastest; the output bit depth is inferred from the largest value.
 pub fn parse_3dl(text: &str) -> Result<LutFile, LutError> {
     let mut rows: Vec<[f64; 3]> = Vec::new();
+    let mut first_line: Option<Vec<f64>> = None;
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
         if line.is_empty() || line.starts_with(|c: char| c.is_ascii_alphabetic()) {
@@ -191,7 +192,15 @@ pub fn parse_3dl(text: &str) -> Result<LutFile, LutError> {
         if v.len() == 3 {
             rows.push([v[0], v[1], v[2]]);
         }
+        if first_line.is_none() && !v.is_empty() {
+            first_line = Some(v);
+        }
         // Lines with more than three numbers are the input shaper; it is assumed linear.
+    }
+    // A 3³ table's shaper has three values, so it reads like a node row: it is the shaper when
+    // it is an increasing input ramp and exactly 3³ nodes follow it.
+    if rows.len() == 28 && first_line.is_some_and(|v| v.len() == 3 && v[0] < v[1] && v[1] < v[2]) {
+        rows.remove(0);
     }
     let n = (rows.len() as f64).cbrt().round() as usize;
     if n < 2 || n * n * n != rows.len() {
@@ -453,6 +462,23 @@ DOMAIN_MAX 0.5 1 1
         let l = parse_3dl(&text).unwrap();
         assert_eq!(l.size, 2);
         assert_eq!(l.data, LutFile::identity(2).data);
+    }
+
+    #[test]
+    fn three_dl_three_point_shaper_is_not_a_node() {
+        let mut nodes = String::new();
+        for r in 0..3 {
+            for g in 0..3 {
+                for b in 0..3 {
+                    nodes.push_str(&format!("{} {} {}\n", 4095 - r * 2047, 4095 - g * 2047, 4095 - b * 2047));
+                }
+            }
+        }
+        let with_shaper = parse_3dl(&format!("3DMESH\nMesh 1 12\n0 512 1023\n{nodes}")).unwrap();
+        assert_eq!(with_shaper.size, 3);
+        assert_eq!(with_shaper, parse_3dl(&nodes).unwrap());
+        // 28 rows whose first row is not an increasing ramp is still not a cube.
+        assert!(parse_3dl(&format!("4095 4095 4095\n{nodes}")).is_err());
     }
 
     #[test]
