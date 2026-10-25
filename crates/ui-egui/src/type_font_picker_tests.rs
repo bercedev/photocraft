@@ -817,6 +817,12 @@ fn options_bar_menu_arrows_walk_on_while_recording_recent_fonts() {
     h.query_all_by_role(Role::ComboBox).next().unwrap().click();
     h.run();
     let mut seen = vec![h.state().ui.tool_options.type_font.clone()];
+    // The menu lists the machine's fonts: four steps need four families after the start (#9492).
+    let after = super::families().iter().skip_while(|f| **f != seen[0]).skip(1).count();
+    if after < 4 {
+        eprintln!("skipping: fewer than four font families sort after {} (install more fonts to run this)", seen[0]);
+        return;
+    }
     for _ in 0..4 {
         h.key_press(Key::ArrowDown);
         // The open font menu repaints for its caret, so step a bounded number of times.
