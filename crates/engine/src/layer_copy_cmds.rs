@@ -146,6 +146,9 @@ pub(crate) fn translate_copies(copies: &mut Document, destination: &Document, dx
 /// the runs keep their resolved attributes either way.
 fn import_text_styles(copies: &mut Document, from: &TextStyles, into: &mut TextStyles) {
     let (mut chars, mut paras) = (HashMap::new(), HashMap::new());
+    // An earlier copy may have imported the style under a numbered name ("Body 1"); that one counts too.
+    let same_name =
+        |name: &str, base: &str| name == base || name.strip_prefix(base).and_then(|n| n.strip_prefix(' ')).is_some_and(|n| n.parse::<u32>().is_ok());
     let ids: Vec<LayerId> = copies.walk().into_iter().map(|(_, _, l)| l.id).collect();
     for id in ids {
         let Some(LayerContent::Text(t)) = copies.layer_mut(id).map(|l| &mut l.content) else { continue };
@@ -153,7 +156,7 @@ fn import_text_styles(copies: &mut Document, from: &TextStyles, into: &mut TextS
             if let Some(old) = r.style.style_sheet {
                 r.style.style_sheet = *chars.entry(old).or_insert_with(|| {
                     let def = from.char_style(old)?;
-                    if let Some(same) = into.character.iter().find(|d| d.name == def.name && d.attrs == def.attrs) {
+                    if let Some(same) = into.character.iter().find(|d| same_name(&d.name, &def.name) && d.attrs == def.attrs) {
                         return Some(same.id);
                     }
                     let id = into.next_char_id()?;
@@ -168,7 +171,9 @@ fn import_text_styles(copies: &mut Document, from: &TextStyles, into: &mut TextS
             if let Some(old) = r.style.style_sheet.filter(|id| *id != 0) {
                 r.style.style_sheet = *paras.entry(old).or_insert_with(|| {
                     let def = from.para_style(old)?;
-                    if let Some(same) = into.paragraph.iter().find(|d| d.name == def.name && d.para_attrs == def.para_attrs && d.char_attrs == def.char_attrs) {
+                    if let Some(same) =
+                        into.paragraph.iter().find(|d| same_name(&d.name, &def.name) && d.para_attrs == def.para_attrs && d.char_attrs == def.char_attrs)
+                    {
                         return Some(same.id);
                     }
                     let id = into.next_para_id()?;

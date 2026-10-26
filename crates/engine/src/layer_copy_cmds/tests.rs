@@ -413,6 +413,29 @@ fn copied_text_brings_its_named_styles_instead_of_binding_the_destinations_ids()
     assert_eq!((doc(&s, 1).text_styles.character.len(), doc(&s, 1).text_styles.paragraph.len()), (1, 1));
 }
 
+/// A name the destination already uses for another style is imported once as "Body 1", and later
+/// copies reuse it instead of adding "Body 2".
+#[test]
+fn a_clashing_style_name_is_imported_once_across_copies() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
+    let text = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    let cs = s.execute("type.characterStyle.new", json!({"name": "Body", "fromSelection": false, "attrs": {"size": 24}})).unwrap()["id"].as_u64().unwrap();
+    s.execute("type.characterStyle.apply", json!({"id": cs, "layer": text, "range": [0, 5]})).unwrap();
+    s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+    s.execute("type.characterStyle.new", json!({"name": "Body", "fromSelection": false, "attrs": {"size": 48}})).unwrap();
+    let copy = |s: &mut Session| {
+        s.set_active(0);
+        let r = s.execute("layer.copyToDocument", json!({"document": 1, "layers": [text]})).unwrap();
+        let LayerContent::Text(t) = &doc(s, 1).layer(copied(&r)).unwrap().content else { panic!("not text") };
+        t.runs[0].style.style_sheet.unwrap()
+    };
+    let first = copy(&mut s);
+    assert_eq!(doc(&s, 1).text_styles.char_style(first).unwrap().name, "Body 1");
+    assert_eq!(copy(&mut s), first, "the second copy reuses Body 1");
+    assert_eq!(doc(&s, 1).text_styles.character.len(), 2);
+}
+
 #[test]
 fn a_layer_duplicated_into_a_new_document_keeps_its_named_styles() {
     let mut s = Session::new();
