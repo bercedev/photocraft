@@ -801,13 +801,17 @@ fn open_menu_on_a_recent_font_steps_through_the_alphabet() {
 fn options_bar_menu_arrows_walk_on_while_recording_recent_fonts() {
     use crate::{PhotocraftApp, Services};
     use serde_json::json;
+    use std::sync::Arc;
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
-    app.run("type.create", json!({"text": "Sample", "font": "Inter", "size": 18})).unwrap();
+    app.run("type.create", json!({"text": "Sample", "font": "Family 00", "size": 18})).unwrap();
+    app.ui.tool_options.type_font = "Family 00".into();
+    // Keep enough rows after the initial family even when no system fonts are installed (#9492).
+    let families = Arc::new((0..10).map(|i| format!("Family {i:02}")).collect());
     let mut h = Harness::builder().with_size(vec2(900.0, 700.0)).build_ui_state(
-        |ui, app| {
+        move |ui, app| {
             if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                ui.horizontal(|ui| crate::type_tool::options_bar(app, ui));
+                ui.horizontal(|ui| crate::type_tool::options_bar_with_families(app, ui, || Arc::clone(&families)));
             }
         },
         app,
@@ -817,12 +821,6 @@ fn options_bar_menu_arrows_walk_on_while_recording_recent_fonts() {
     h.query_all_by_role(Role::ComboBox).next().unwrap().click();
     h.run();
     let mut seen = vec![h.state().ui.tool_options.type_font.clone()];
-    // The menu lists the machine's fonts: four steps need four families after the start (#9492).
-    let after = super::families().iter().skip_while(|f| **f != seen[0]).skip(1).count();
-    if after < 4 {
-        eprintln!("skipping: fewer than four font families sort after {} (install more fonts to run this)", seen[0]);
-        return;
-    }
     for _ in 0..4 {
         h.key_press(Key::ArrowDown);
         // The open font menu repaints for its caret, so step a bounded number of times.
@@ -833,6 +831,7 @@ fn options_bar_menu_arrows_walk_on_while_recording_recent_fonts() {
     once.sort();
     once.dedup();
     assert_eq!(once.len(), seen.len(), "each ↓ reaches a new family: {seen:?}");
+    assert_eq!(seen, ["Family 00", "Family 01", "Family 02", "Family 03", "Family 04"], "arrows keep walking alphabetically");
     assert_eq!(h.state().ui.recent_fonts.first(), seen.last(), "the picks are recorded");
 }
 

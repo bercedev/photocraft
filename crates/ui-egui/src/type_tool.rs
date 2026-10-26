@@ -3207,6 +3207,11 @@ pub fn foreground_changed(app: &mut PhotocraftApp) {
 
 /// Photoshop's Type options bar.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    options_bar_with_families(app, ui, families);
+}
+
+// Keep discovery lazy until fonts_ready; tests inject a catalog without changing shared font state.
+fn options_bar_with_families(app: &mut PhotocraftApp, ui: &mut egui::Ui, families: impl FnOnce() -> Arc<Vec<String>>) {
     let t = crate::theme::Tokens::get(ui.ctx());
     // Show the target layer's (first-run) style, else the tool defaults.
     let shown = target(app).and_then(|(id, _)| {
@@ -3234,7 +3239,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Font family and style menus (one placeholder in their place while the fonts load).
     if fonts_ready(ui, 170.0 + ui.spacing().item_spacing.x + 110.0) {
-        if font_picker(ui, &mut fam, 170.0, app.session.prefs().type_.font_preview, &app.ui.recent_fonts) {
+        if family_picker_in(ui, "type-font", &mut fam, 170.0, &families(), app.session.prefs().type_.font_preview, &app.ui.recent_fonts) {
             app.note_recent_font(&fam);
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
