@@ -11,7 +11,8 @@
 use std::collections::{HashMap, HashSet};
 
 use photocraft_color::ColorMode;
-use photocraft_doc::{Document, Layer, LayerContent, LayerId, SmartContentsId};
+use photocraft_doc::text_styles::{CharacterStyleDef, ParagraphStyleDef};
+use photocraft_doc::{Document, Layer, LayerContent, LayerId, SmartContentsId, TextStyles};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
@@ -139,6 +140,47 @@ pub(crate) fn translate_copies(copies: &mut Document, destination: &Document, dx
     }
 }
 
+/// Named type styles belong to their document, so a style id means nothing in another one
+/// (#9620): rebinds the copied text to the destination's styles, importing each source style
+/// it lacks under a fresh id. A reference with no source definition, or no free id, is dropped;
+/// the runs keep their resolved attributes either way.
+fn import_text_styles(copies: &mut Document, from: &TextStyles, into: &mut TextStyles) {
+    let (mut chars, mut paras) = (HashMap::new(), HashMap::new());
+    let ids: Vec<LayerId> = copies.walk().into_iter().map(|(_, _, l)| l.id).collect();
+    for id in ids {
+        let Some(LayerContent::Text(t)) = copies.layer_mut(id).map(|l| &mut l.content) else { continue };
+        for r in &mut t.runs {
+            if let Some(old) = r.style.style_sheet {
+                r.style.style_sheet = *chars.entry(old).or_insert_with(|| {
+                    let def = from.char_style(old)?;
+                    if let Some(same) = into.character.iter().find(|d| d.name == def.name && d.attrs == def.attrs) {
+                        return Some(same.id);
+                    }
+                    let id = into.next_char_id()?;
+                    let name = if into.character.iter().any(|d| d.name == def.name) { into.unique_name(false, &def.name) } else { def.name.clone() };
+                    into.character.push(CharacterStyleDef { id, name, attrs: def.attrs.clone() });
+                    Some(id)
+                });
+            }
+        }
+        for r in &mut t.paragraphs {
+            // 0 is Basic Paragraph, which every document has.
+            if let Some(old) = r.style.style_sheet.filter(|id| *id != 0) {
+                r.style.style_sheet = *paras.entry(old).or_insert_with(|| {
+                    let def = from.para_style(old)?;
+                    if let Some(same) = into.paragraph.iter().find(|d| d.name == def.name && d.para_attrs == def.para_attrs && d.char_attrs == def.char_attrs) {
+                        return Some(same.id);
+                    }
+                    let id = into.next_para_id()?;
+                    let name = if into.paragraph.iter().any(|d| d.name == def.name) { into.unique_name(true, &def.name) } else { def.name.clone() };
+                    into.paragraph.push(ParagraphStyleDef { id, name, para_attrs: def.para_attrs.clone(), char_attrs: def.char_attrs.clone() });
+                    Some(id)
+                });
+            }
+        }
+    }
+}
+
 /// `layer.copyToDocument`.
 fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     let dest = doc_index(s, p, "document")?.ok_or_else(|| bad("missing `document` (the destination's index)"))?;
@@ -210,10 +252,13 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     let (dx, dy) = (dx.round() as i32, dy.round() as i32);
     translate_copies(&mut copies, &ddoc, dx, dy);
     let patterns: Vec<_> = sdoc.patterns.iter().filter(|pat| !ddoc.patterns.iter().any(|d| d.id == pat.id)).cloned().collect();
+    let mut text_styles = ddoc.text_styles.clone();
+    import_text_styles(&mut copies, &sdoc.text_styles, &mut text_styles);
     s.set_active(dest);
     let label = if ids.len() == 1 { "Duplicate Layer" } else { "Duplicate Layers" };
     let edited = s.edit(label, |doc, active| {
         doc.patterns.extend(patterns);
+        doc.text_styles = text_styles;
         let mut above = *active;
         let mut new = Vec::with_capacity(copies.layers.len());
         for l in copies.layers {
@@ -263,6 +308,7 @@ pub(crate) fn duplicate_to_new_document(s: &mut Session, p: &Value) -> Result<Va
     nd.resolution_dpi = sdoc.resolution_dpi;
     nd.icc_profile.clone_from(&sdoc.icc_profile);
     nd.patterns.clone_from(&sdoc.patterns);
+    nd.text_styles.clone_from(&sdoc.text_styles);
     nd.global_light = sdoc.global_light;
     for id in &ids {
         let mut l = sdoc.layer(*id).ok_or(EngineError::NoLayer(*id))?.duplicate();

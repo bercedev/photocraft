@@ -369,3 +369,60 @@ fn a_copied_group_cannot_nest_the_destination_past_the_group_depth_limit() {
     assert!(e.to_string().contains("deeper than"), "{e}");
     assert_eq!(*doc(&s, 1), before, "nothing was copied");
 }
+
+/// #9620: style ids are per document, so the source's style 1 must not bind to the destination's.
+#[test]
+fn copied_text_brings_its_named_styles_instead_of_binding_the_destinations_ids() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
+    let text = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    let cs = s.execute("type.characterStyle.new", json!({"name": "Source black 24", "fromSelection": false, "attrs": {"size": 24}})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    s.execute("type.characterStyle.apply", json!({"id": cs, "layer": text, "range": [0, 5]})).unwrap();
+    let ps = s.execute("type.paragraphStyle.new", json!({"name": "Source body", "fromSelection": false, "attrs": {"align": "center"}})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    s.execute("type.paragraphStyle.apply", json!({"id": ps, "layer": text, "range": [0, 5]})).unwrap();
+    s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+    let dcs = s.execute("type.characterStyle.new", json!({"name": "Destination red 48", "fromSelection": false, "attrs": {"size": 48}})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let dps = s.execute("type.paragraphStyle.new", json!({"name": "Destination head", "fromSelection": false, "attrs": {"align": "right"}})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    assert_eq!((cs, ps), (dcs, dps), "both documents number their first styles 1");
+    let copy = |s: &mut Session| {
+        s.set_active(0);
+        let r = s.execute("layer.copyToDocument", json!({"document": 1, "layers": [text]})).unwrap();
+        let LayerContent::Text(t) = &doc(s, 1).layer(copied(&r)).unwrap().content else { panic!("not text") };
+        (t.runs[0].style.style_sheet.unwrap(), t.paragraphs[0].style.style_sheet.unwrap())
+    };
+    let (c, p) = copy(&mut s);
+    let st = &doc(&s, 1).text_styles;
+    assert_ne!((c, p), (dcs as u32, dps as u32));
+    assert_eq!(st.char_style(c).unwrap().name, "Source black 24");
+    assert_eq!(st.para_style(p).unwrap().name, "Source body");
+    assert_eq!(st.char_style(dcs as u32).unwrap().name, "Destination red 48", "the destination's own styles are untouched");
+    assert_eq!(st.para_style(dps as u32).unwrap().name, "Destination head");
+    // A second copy reuses the imported styles, and undo takes an import back with its copy.
+    assert_eq!(copy(&mut s), (c, p));
+    assert_eq!((doc(&s, 1).text_styles.character.len(), doc(&s, 1).text_styles.paragraph.len()), (2, 2));
+    assert!(s.undo());
+    assert!(s.undo());
+    assert_eq!((doc(&s, 1).text_styles.character.len(), doc(&s, 1).text_styles.paragraph.len()), (1, 1));
+}
+
+#[test]
+fn a_layer_duplicated_into_a_new_document_keeps_its_named_styles() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
+    let text = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    let cs = s.execute("type.characterStyle.new", json!({"name": "Source black 24", "fromSelection": false, "attrs": {"size": 24}})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    s.execute("type.characterStyle.apply", json!({"id": cs, "layer": text, "range": [0, 5]})).unwrap();
+    let r = s.execute("layer.duplicate", json!({"layer": text, "document": "new"})).unwrap();
+    let d = doc(&s, r["document"].as_u64().unwrap() as usize);
+    assert_eq!(d.text_styles.char_style(cs as u32).unwrap().name, "Source black 24");
+}
