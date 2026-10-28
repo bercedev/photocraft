@@ -436,6 +436,27 @@ fn a_clashing_style_name_is_imported_once_across_copies() {
     assert_eq!(doc(&s, 1).text_styles.character.len(), 2);
 }
 
+/// An imported style's colour converts with the copied runs, so clearing a run's overrides in a
+/// destination of another colour mode keeps the converted colour.
+#[test]
+fn an_imported_styles_colour_converts_with_the_copied_runs() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
+    let text = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    let cs =
+        s.execute("type.characterStyle.new", json!({"name": "Red", "fromSelection": false, "attrs": {"color": "#ff0000"}})).unwrap()["id"].as_u64().unwrap();
+    s.execute("type.characterStyle.apply", json!({"id": cs, "layer": text, "range": [0, 5]})).unwrap();
+    s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+    s.execute("image.mode.grayscale", json!({})).unwrap();
+    s.set_active(0);
+    let r = s.execute("layer.copyToDocument", json!({"document": 1, "layers": [text]})).unwrap();
+    let d = doc(&s, 1);
+    let LayerContent::Text(t) = &d.layer(copied(&r)).unwrap().content else { panic!("not text") };
+    let run = &t.runs[0].style;
+    assert_eq!(run.color.mode, ColorMode::Grayscale);
+    assert_eq!(d.text_styles.resolve_char(None, run.style_sheet, "").color, run.color);
+}
+
 #[test]
 fn a_layer_duplicated_into_a_new_document_keeps_its_named_styles() {
     let mut s = Session::new();

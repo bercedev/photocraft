@@ -222,6 +222,8 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     // the way a whole document does.
     let mut copies = Document::new("", sdoc.size, sdoc.mode, sdoc.depth);
     copies.icc_profile = sdoc.icc_profile.clone();
+    // The styles convert along with the runs, so an imported style keeps the runs' colour.
+    copies.text_styles = sdoc.text_styles.clone();
     // Type re-lays out at the source's resolution, so it keeps its size in pixels.
     copies.resolution_dpi = sdoc.resolution_dpi;
     for id in &ids {
@@ -258,7 +260,8 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     translate_copies(&mut copies, &ddoc, dx, dy);
     let patterns: Vec<_> = sdoc.patterns.iter().filter(|pat| !ddoc.patterns.iter().any(|d| d.id == pat.id)).cloned().collect();
     let mut text_styles = ddoc.text_styles.clone();
-    import_text_styles(&mut copies, &sdoc.text_styles, &mut text_styles);
+    let from = std::mem::take(&mut copies.text_styles);
+    import_text_styles(&mut copies, &from, &mut text_styles);
     s.set_active(dest);
     let label = if ids.len() == 1 { "Duplicate Layer" } else { "Duplicate Layers" };
     let edited = s.edit(label, |doc, active| {
