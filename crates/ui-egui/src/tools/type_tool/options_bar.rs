@@ -1,8 +1,8 @@
 use super::defaults::{apply, formatting_params, open_color_picker, shown_scale, target, target_doc, type_unit};
 use super::editing::{cancel, commit_with};
-use super::fonts::{fonts_ready, selected_style, style_label, styles};
+use super::fonts::{families, font_picker_from, fonts_ready, selected_style, style_label, styles};
 use super::keys::is_vertical;
-use super::*;
+use super::{Arc, Color32, LayerId, PhotocraftApp, Stroke, byte_of, json, text_layer};
 
 /// Photoshop's Type options bar.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -38,13 +38,22 @@ pub(super) fn options_bar_with_families(app: &mut PhotocraftApp, ui: &mut egui::
     }
     // Font family and style menus (one placeholder in their place while the fonts load).
     if fonts_ready(ui, 170.0 + ui.spacing().item_spacing.x + 110.0) {
-        if family_picker_in(ui, "type-font", &mut fam, 170.0, &families(), app.session.prefs().type_.font_preview, &app.ui.recent_fonts) {
-            app.note_recent_font(&fam);
+        if let Some(picked) = font_picker_from(app, ui, &mut fam, 170.0, families) {
             app.ui.tool_options.type_font = fam.clone();
             let st = styles(&fam);
-            style = if st.contains(&style) { style } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
+            let picked = picked.filter(|s| st.contains(s));
+            style = match &picked {
+                Some(s) => s.clone(),
+                None if st.contains(&style) => style,
+                None => st.first().cloned().unwrap_or_else(|| "Regular".into()),
+            };
             app.ui.tool_options.type_style = style.clone();
-            apply(app, ui.ctx(), json!({"font": fam}));
+            // Only a style picked under the family's ">" is set: otherwise each selected layer
+            // keeps its own face in the new family (#3556).
+            match picked {
+                Some(s) => apply(app, ui.ctx(), json!({"font": fam, "fontStyle": s})),
+                None => apply(app, ui.ctx(), json!({"font": fam})),
+            }
         }
         let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
         let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
