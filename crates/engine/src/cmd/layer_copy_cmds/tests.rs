@@ -457,6 +457,25 @@ fn an_imported_styles_colour_converts_with_the_copied_runs() {
     assert_eq!(d.text_styles.resolve_char(None, run.style_sheet, "").color, run.color);
 }
 
+/// A style colour the conversion leaves alone keeps its raw value, so it still matches the
+/// destination's equal style instead of coming in again as "Grey 1".
+#[test]
+fn an_unconverted_style_colour_still_matches_the_destinations_style() {
+    let grey = json!({"color": {"mode": "Grayscale", "c": [0.1000000001, 0.0, 0.0, 0.0], "alpha": 1.0}});
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100, "background": "transparent"})).unwrap();
+    let text = s.execute("type.create", json!({"x": 10, "y": 50, "text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    let cs = s.execute("type.characterStyle.new", json!({"name": "Grey", "fromSelection": false, "attrs": grey})).unwrap()["id"].as_u64().unwrap();
+    s.execute("type.characterStyle.apply", json!({"id": cs, "layer": text, "range": [0, 5]})).unwrap();
+    s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+    s.execute("image.mode.grayscale", json!({})).unwrap();
+    s.execute("type.characterStyle.new", json!({"name": "Grey", "fromSelection": false, "attrs": grey})).unwrap();
+    s.set_active(0);
+    s.execute("layer.copyToDocument", json!({"document": 1, "layers": [text]})).unwrap();
+    let names: Vec<_> = doc(&s, 1).text_styles.character.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names, ["Grey"]);
+}
+
 #[test]
 fn a_layer_duplicated_into_a_new_document_keeps_its_named_styles() {
     let mut s = Session::new();

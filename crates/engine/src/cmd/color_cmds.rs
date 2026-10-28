@@ -763,8 +763,12 @@ fn convert_style_colors(doc: &mut Document, cc: &mut dyn FnMut(&mut Color)) {
     let sets = st.character.iter_mut().map(|d| &mut d.attrs).chain(st.paragraph.iter_mut().map(|d| &mut d.char_attrs)).chain([&mut st.basic.char_attrs]);
     for v in sets.filter_map(|a| a.get_mut("color")) {
         if let Ok(mut c) = serde_json::from_value::<Color>(v.clone()) {
+            let before = c;
             cc(&mut c);
-            if let Ok(n) = serde_json::to_value(c) {
+            // An untouched colour keeps its raw value, so it still matches an equal raw style.
+            if c != before
+                && let Ok(n) = serde_json::to_value(c)
+            {
                 *v = n;
             }
         }
